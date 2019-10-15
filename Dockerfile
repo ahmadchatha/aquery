@@ -10,8 +10,11 @@ RUN \
   rm sbt-$SBT_VERSION.deb && \
   apt-get update && \
   apt-get install sbt && \
+  apt-get install rlwrap && \
   sbt sbtVersion
 
 WORKDIR /code
 ADD . /code
-CMD sbt run
+COPY q /root/q
+
+RUN echo "alias q='QHOME=~/q rlwrap -r ~/q/l64/q'" >> ~/.bashrc
