@@ -17,4 +17,4 @@ WORKDIR /code
 ADD . /code
 COPY q /root/q
 
-RUN echo "alias q='QHOME=~/q rlwrap -r ~/q/l64/q'" >> ~/.bashrc
+ENV PATH="$PATH:~/q/l64/"

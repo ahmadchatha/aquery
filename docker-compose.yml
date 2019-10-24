@@ -5,4 +5,9 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ./:/code
+      - type: bind
+        source: ./
+        target: /code
+    command:
+    - "sleep"
+    - "36000"
