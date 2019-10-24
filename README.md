@@ -25,6 +25,23 @@ Scala version.
 
 
 ## Installation/Building
+
+### Docker Installation
+Install docker on your platform. Also grab 64bit q personal edition from https://kx.com/connect-with-us/download/
+along with the licensing file and add the q directory (rename l64 to q and place k.lic in it) at the base aquery folder.
+Then:
+
+```
+docker-compose up -d
+docker run -it aquery_sbt bash
+```
+Now you should be inside the docker container. Build without running the tests:
+```
+sbt 'set test in assembly := {}' clean assembly
+```
+This will put aquery.jar under /code/target/scala-2.11
+
+### Host Installation
 If you are interested in using AQuery, the steps below should provide you
 with all the information needed to build on your system. Note that A2Q is meant
 for \*nix. There are no plans on making this available for windows.
@@ -64,6 +81,7 @@ sbt assembly
 
 This will save the AQuery jar as `target/scala-2.11/aquery.jar`.
 
+### Aquery to Q
 To get basic usage information you can run
 
 ```
