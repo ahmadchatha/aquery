@@ -116,8 +116,8 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
    * @return
    */
   def kdbSelect(t: Option[String], w: Option[String], b: Option[String], p: Option[String])
-  : String =
-    kdbFunctional("?", t, w, b, p)
+  : String = s"select ${p.getOrElse("()")} from ${t.getOrElse("")}"
+    //kdbFunctional("?", t, w, b, p)
 
   /**
    * Wrapper for kdb update statement
@@ -162,7 +162,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
    * @param s
    * @return
    */
-  def kdbSym(s: String): String = "`" + s
+  def kdbSym(s: String): String = s
 
   /**
    * Wrapper for kdb boolean datatype
@@ -194,11 +194,11 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
    */
   def genExprDict(es: Seq[(Expr, String)], fk: String => String): CodeGen = es match {
     case (WildCard, _) :: Nil => genTableExpr(WildCard)
-    case (v, n) :: Nil => genExpr(v).map(c => s"(enlist[${fk(n)}]!enlist $c)")
+    case (v, n) :: Nil => genExpr(v).map(c => s"$c")
     case _ if !es.exists(_._1 == WildCard) =>
       val (values, rawKeys) = es.unzip
       val keys = rawKeys.map(str => s"(${fk(str)})").mkString(";")
-      genCodeList(values.toList, ";")(genExpr).map(vs => s"($keys)!($vs)")
+      genCodeList(values.toList, ",")(genExpr).map(vs => s"$vs")
     // if there is a wild card, we should generate each separately and then append
     case _ => genCodeList(es.toList.map(e => List(e)), ",")(genExprDict(_, fk))
   }
@@ -238,7 +238,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
   def genExprList(es: Seq[Expr], wrap: Boolean): CodeGen = es match {
     case Nil => kdbEmptyList
     case x :: xs =>
-      val ge = genCodeList(es.toList, ";")(genExpr)
+      val ge = genCodeList(es.toList, " ")(genExpr)
       if(wrap) ge.map(l => makeList("(" + l + ")", es.length)) else ge
   }
 
@@ -312,7 +312,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
    * @param str
    * @return
    */
-  def getColLookup(str: String): String = s"{x^.aq.cd x} ${kdbSym(str)}"
+  def getColLookup(str: String): String = s"${kdbSym(str)}"
 
   /**
    * Generate code for a literal
@@ -339,7 +339,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
   def genTableExpr(t: TableExpr): CodeGen = t match {
     case RowId => SimpleState.unit(kdbSym("i"))
     case ColumnAccess(tn, c) => SimpleState.unit(getColLookup(tn + "." + c))
-    case WildCard => for (t <- getCurrTable) yield s"(.aq.wildCard $t)"
+    case WildCard => for (t <- getCurrTable) yield s""
   }
 
   /**
@@ -367,9 +367,9 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
     val woArgs = (lcs, None)
     val wArgs = (lcs, Some(nargs))
     if (BUILT_INS.contains(wArgs))
-      ".aq." + lcs + nargs
+      lcs + nargs
     else if (BUILT_INS.contains(woArgs))
-      ".aq." + lcs
+      lcs
     else
       s
   }
@@ -401,7 +401,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
     ) yield {
       val cleanF = if (g) s"$f'" else f
       val cleanAs = if (variadic) addEnlist(as) else as
-      s"($cleanF;$cleanAs)"
+      s"$cleanF($as)"
     }
   }
 
@@ -480,9 +480,10 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
     val alias = t.alias.getOrElse(table)
     for (
       temp <- genTempTableName();
-      _ <- setCurrTable(temp);
+      _ <- setCurrTable(table);
       rename <- renameCols
-    ) yield s""" $temp:.aq.initTable[$table;"$alias";${kdbBool(rename)}];"""
+    ) yield s"""$temp:$table;"""
+    // yield s""" $temp:$table;"$alias";${kdbBool(rename)}];"""
   }
 
   /**
@@ -614,7 +615,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
       before <- genRelAlg(p.t);
       t <- getCurrTable;
       ps <- genExprDict(cleanProjections, kdbSym)
-    ) yield s"$before\n $t:${kdbSelect(Some(t), None, None, Some(ps))};"
+    ) yield s"${kdbSelect(Some(t), None, None, Some(ps))};"
   }
 
 
@@ -799,12 +800,14 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
    *          be used for further processing)
    * @return
    */
-  def genPlan(plan: RelAlg, f: String => String): CodeGen =
+  def genPlan(plan: RelAlg, f: String => String): CodeGen = {
     for(
       _ <- cleanQueryEnv;
       code <- genRelAlg(plan);
       t <- getCurrTable
-    ) yield s"$initQueryState\n$code\n ${f(t)}"
+    ) yield s"$code"
+  }
+    // yield s"$initQueryState\n$code\n ${f(t)}"
 
   /**
    * Generate code for a complete query, with possible local queries
@@ -863,7 +866,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
     case Create(n, Right(q)) =>
       for(query <- genQuery(q)) yield s".aq.show ${kdbSym(n)} set {\n$query\n }[];"
     case Create(n, Left(s)) =>
-      SimpleState.unit(s".aq.show ${kdbSym(n)} set ${genSchema(s)};")
+      SimpleState.unit(s"${kdbSym(n)}: +${genSchema(s)}!${genTypes(s)};")
   }
 
   /**
@@ -872,8 +875,15 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
    * @return
    */
   def genSchema(ls: List[(String, TypeName)]): String =
-    "([]"+ ls.map{ case (c, t) => s"""$c:"${getTypeCode(t)}"$$()"""}.mkString(";") +")"
+    ls.map{ case (c, t) => s"""`$c"""}.mkString("")
 
+  /**
+   * Generate types for a schema
+   * @param ls
+   * @return
+   */
+  def genTypes(ls: List[(String, TypeName)]): String =
+    "(" + ls.map{ case (c, t) => s""""${getTypeCode(t)}"$$()"""}.mkString(";") + ")"
   /**
    * Get the appropriate kdb type code. Note that ints get mapped to longs, which are default
    * in newer kdb+ (using version KDB+ 3.3 2015.11.03 for this)
@@ -921,8 +931,8 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
       else
         SimpleState.unit(i.n)
     val data: CodeGen = i.src match {
-      case Right(q) => genQuery(q).map(c => s"\n {\n $c\n }[]")
-      case Left(es) => genExprList(es, wrap = false).map(c => s"eval ${addEnlist(c)}")
+      case Right(q) => genQuery(q).map(c => s"$c")
+      case Left(es) => genExprList(es, wrap = false).map(c => s"${c}")
     }
     val modifier: CodeGen =
       if (i.modifier.nonEmpty)
@@ -933,7 +943,8 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
       s <- sorted;
       d <- data;
       m <- modifier
-    ) yield s".aq.insert[${kdbSym(i.n)};$s;$m;$d]"
+    ) yield s"${kdbSym(i.n)},: $d"
+    // yield s".aq.insert[${kdbSym(i.n)};$s;$m;$d]"
   }
 
   /**
@@ -1073,7 +1084,8 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
         val qName = getQueryName(id)
         val call = if (runQueries) s"$qName[]" else ""
         // generate the query code and run
-        s"$qName:{\n$code\n };\n$call"
+        //s"$qName:{\n$code\n };\n$call"
+        s"$code"
       }
     case VerbatimCode(c) => SimpleState.unit("// verbatim code\n" + c)
     case io: DataIO => genDataIO(io)
@@ -1101,9 +1113,9 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
   def generate(prog: Seq[TopLevel]): String = {
     val translator = for (
       prelude <- getPrelude;
-      msg <- SimpleState.unit("// Translation begins here");
+      msg <- SimpleState.unit("// Translation begins here. Goodluck!");
       code <- genCodeList(prog.toList, "\n\n")(e => for (_ <- cleanTopEnv; c <- genTopLevel(e)) yield c)
-    ) yield s"$prelude\n$msg\n$code\n"
+    ) yield s"$msg\n$code\n"
     // generate code with initially clean state
     translator(CodeState())._2
   }
