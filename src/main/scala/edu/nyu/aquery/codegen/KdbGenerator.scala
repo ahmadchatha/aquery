@@ -13,11 +13,11 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
   // kdb versions of these are the same names just prefixed by .aq.
   val BUILT_INS =
     """
-      abs, and, avg, avgs_1, avgs_2, between, concatenate, count, deltas, distinct,
+      abs, and, avg, avgs_1, between, concatenate, count, deltas, distinct,
       drop, list, exec_arrays, flatten, fill, first_1, first_2, is, in, indexEven, indexOdd,
       indexEveryN, last_1, last_2, like, makeNull, max, maxs_1, maxs_2, min, mins_1, mins_2,
       mod, moving, next_1, next_2, not, null, or, overlaps, pow, prev_1, prev_2, prd, prds,
-      ratios, reverse, show, sum, sums_1, sums_2, sqrt, stddev, toSym, vars
+      ratios, reverse, show, sum, sums, sqrt, stddev, toSym, vars
     """.split(",")
       .map{w =>
         val t = w.trim
@@ -238,7 +238,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
   def genExprList(es: Seq[Expr], wrap: Boolean): CodeGen = es match {
     case Nil => kdbEmptyList
     case x :: xs =>
-      val ge = genCodeList(es.toList, " ")(genExpr)
+      val ge = genCodeList(es.toList, ";")(genExpr)
       if(wrap) ge.map(l => makeList("(" + l + ")", es.length)) else ge
   }
 
@@ -272,7 +272,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
     for (
       l <- genExpr(b.l);
       r <- genExpr(b.r)
-    ) yield  s"(${genBinOp(b.op)}; $l; $r)"
+    ) yield  s".(${genBinOp(b.op)}; $l; $r)"
 
   /**
    * Generate code for unary expression operator
@@ -302,7 +302,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
       nv <- nameAsVar;
       iu <- inUDF) yield
       if (iu)
-        s".aq.funEnlist ${id.v}"
+        s"${id.v}"
       else if (nv)
         id.v
       else getColLookup(id.v)
@@ -401,7 +401,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
     ) yield {
       val cleanF = if (g) s"$f'" else f
       val cleanAs = if (variadic) addEnlist(as) else as
-      s"$cleanF($as)"
+      s"$cleanF[$as]"
     }
   }
 
@@ -615,7 +615,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
       before <- genRelAlg(p.t);
       t <- getCurrTable;
       ps <- genExprDict(cleanProjections, kdbSym)
-    ) yield s"${kdbSelect(Some(t), None, None, Some(ps))};"
+    ) yield s"${kdbSelect(Some(t), None, None, Some(ps))}"
   }
 
 
@@ -835,8 +835,9 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
    * @param a
    * @return
    */
-  def genAssign(a: Assign): CodeGen =
-    for (rval <- genExpr(a.e)) yield s" ${a.n}:eval $rval"
+  def genAssign(a: Assign): CodeGen = {
+    for (rval <- genExpr(a.e)) yield s" ${a.n}: $rval"
+  }
 
   /**
    * Generate code for an UDF
@@ -849,7 +850,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
       _ <- setInUDF;
       body <- genCodeList(u.cs, ";\n ")({
         case Left(a) => genAssign(a)
-        case Right(e) => genExpr(e).map("eval " + _)
+        case Right(e) => genExpr(e).map("" + _)
       });
       _ <- remNameAsVar;
       _ <- remInUDF
@@ -1101,7 +1102,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
    * @return
    */
   def getPrelude: CodeGen = SimpleState.unit {
-    val contents = Source.fromURL(getClass.getClassLoader.getResource("q/base.q"))
+    val contents = Source.fromURL(getClass.getClassLoader.getResource("k/base.k"))
     contents.getLines().toList.mkString("\n")
   }
 
@@ -1115,7 +1116,7 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
       prelude <- getPrelude;
       msg <- SimpleState.unit("// Translation begins here. Goodluck!");
       code <- genCodeList(prog.toList, "\n\n")(e => for (_ <- cleanTopEnv; c <- genTopLevel(e)) yield c)
-    ) yield s"$msg\n$code\n"
+    ) yield s"$prelude\n$msg\n$code\n"
     // generate code with initially clean state
     translator(CodeState())._2
   }
