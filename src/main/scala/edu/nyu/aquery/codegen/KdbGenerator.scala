@@ -848,14 +848,14 @@ class KdbGenerator(val runQueries: Boolean = true) extends BackEnd {
     for (
       _ <- setNameAsVar;
       _ <- setInUDF;
-      body <- genCodeList(u.cs, ";\n ")({
+      body <- genCodeList(u.cs, "; ")({
         case Left(a) => genAssign(a)
         case Right(e) => genExpr(e).map("" + _)
       });
       _ <- remNameAsVar;
       _ <- remInUDF
     ) yield
-      s"${u.n}:{[${u.args.mkString(";")}]\n $body\n };"
+      s"${u.n}:{[${u.args.mkString(";")}] $body };"
   }
 
   /**
